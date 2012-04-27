@@ -11,7 +11,10 @@
 #include "cIntervalManager.h"
 #include "cLerpNodePathInterval.h"
 #include "cMetaInterval.h"
- 
+
+/*************************/
+/*        GLOBALS        */
+/*************************/
 PandaFramework framework;
 // The global task manager
 PT(AsyncTaskManager) taskMgr = AsyncTaskManager::get_global_ptr(); 
@@ -19,116 +22,11 @@ PT(AsyncTaskManager) taskMgr = AsyncTaskManager::get_global_ptr();
 PT(ClockObject) globalClock = ClockObject::get_global_clock();
 // Here's what we'll store the camera in.
 NodePath camera;
-double cameraHDist = 2.0;
-double cameraVDist = 10.0;
 
-// This is our task - a global or static function that has to return DoneStatus.
-// The task object is passed as argument, plus a void* pointer, containing custom data.
-// For more advanced usage, we can subclass AsyncTask and override the do_task method.
-AsyncTask::DoneStatus spinCameraTask(GenericAsyncTask* task, void* data) 
-{
-   // Calculate the new position and orientation (inefficient - change me!)
-   double time = globalClock->get_real_time();
-   double angledegrees = time * 6.0;
-   double angleradians = angledegrees * (3.14 / 180.0);
-   camera.set_pos(20*sin(angleradians),-20.0*cos(angleradians),3);
-   camera.set_hpr(angledegrees, 0, 0);
- 
-   // Tell the task manager to continue this task the next frame.
-   return AsyncTask::DS_cont;
-}
-
-/* returns 1, 2, 3, or 4 for quadrants;
- * returns 5, 6, 7, 8 for xpos, ypos, xneg, yneg axes (respectively)
- * or zero if the calculation fails
+/* This is our task - a global or static function that has to return DoneStatus.
+ * The task object is passed as argument, plus a void* pointer, containing custom data.
+ * For more advanced usage, we can subclass AsyncTask and override the do_task method.
  */
-int getAngleQuad( double radAngle )
-{
-   double sinResult = sin( radAngle );
-   double cosResult = cos( radAngle );
-   double tanResult = tan( radAngle );
-
-   bool sinPositive = sinResult > 0;
-   bool cosPositive = cosResult > 0;
-   bool tanPositive = tanResult > 0;
-
-   if( sinPositive && cosPositive && tanPositive ) return 1;
-   if( sinPositive ) return 2;
-   if( tanPositive ) return 3;
-   if( cosPositive ) return 4;
-
-   /* if we get this far, it's on an axis:
-    * deg   sin   cos
-    * 0	   0	   1
-    * 90	   1	   0
-    * 180 	0	   -1
-    * 270   -1	   0
-    */
-   if( sinResult == 0 && cosResult == 1 ) return 5;
-   if( sinResult == 1 && cosResult == 0 ) return 6;
-   if( sinResult == 0 && cosResult == -1 ) return 7;
-   if( sinResult == -1 && cosResult == 0 ) return 8;
-
-   return 0;
-}
-
-// Update camera pos to follow the actor (chase cam)
-AsyncTask::DoneStatus updateCameraTask( GenericAsyncTask* task, void* actor ) 
-{
-   NodePath* actorPtr = (NodePath*)actor;
-   LVecBase3f actorPos = actorPtr->get_pos();
-   LVecBase3f actorHpr = actorPtr->get_hpr();
-
-   double actorXAngleDeg = actorHpr.get_x();
-   double actorXAngleRad = actorXAngleDeg * (3.14 / 180.0);
-   double cameraDeltaX = cameraHDist * cos( actorXAngleRad );
-   double cameraDeltaY = cameraHDist * sin( actorXAngleRad );
-   double cameraAbsX, cameraAbsY, cameraTiltAngleRad, cameraTiltAngleDeg;
-   
-   // fix camera deltas based on actor's view angle quadrant
-   int actorAngleQuad = getAngleQuad( actorXAngleRad );
-   switch( actorAngleQuad )
-   {
-      case 1:
-      case 5:
-         cameraDeltaX = -1 * fabs( cameraDeltaX );
-         cameraDeltaY = -1 * fabs( cameraDeltaY );
-         break;
-      case 2:
-      case 6:
-         cameraDeltaX = fabs( cameraDeltaX );
-         cameraDeltaY = -1 * fabs( cameraDeltaY );
-         break;
-      case 3:
-      case 7:
-         cameraDeltaX = fabs( cameraDeltaX );
-         cameraDeltaY = fabs( cameraDeltaY );
-         break;
-      case 4:
-      case 8:
-         cameraDeltaX = -1 * fabs( cameraDeltaX );
-         cameraDeltaY = fabs( cameraDeltaY );
-         break;
-      default:
-         break;
-   }
-
-   cameraAbsX = actorPos.get_x() + cameraDeltaX;
-   cameraAbsY = actorPos.get_y() + cameraDeltaY;
-   cameraTiltAngleRad = -1.0 * atan( cameraVDist / cameraHDist );
-   cameraTiltAngleDeg = cameraTiltAngleRad / (3.14 / 180.0);
-
-   cout << "Camera: " << cameraAbsX << " " << cameraAbsY << " " 
-      << camera.get_hpr().get_x() << '\n';
-   cout << "Actor: " << actorPos.get_x() << " " << actorPos.get_y() << " " 
-      << actorHpr.get_x() << '\n';
-
-   camera.set_pos( cameraAbsX, cameraAbsY, cameraVDist );
-   camera.set_hpr( actorHpr.get_x(), cameraTiltAngleDeg, 0 );
-
-   // Tell the task manager to continue this task the next frame.
-   return AsyncTask::DS_cont;
-}
 
 // Task to step the interval manager
 AsyncTask::DoneStatus stepIntervalManTask( GenericAsyncTask* task, void* data )
@@ -217,7 +115,6 @@ int main(int argc, char *argv[])
 
    // Load our panda
    NodePath pandaActor = window->load_model(framework.get_models(), "ralph");
-   //pandaActor.set_scale(0.005);
    pandaActor.reparent_to(window->get_render());
 
    // Load the walk animation
@@ -227,18 +124,14 @@ int main(int argc, char *argv[])
    // Sets up notepaths for the panda motion
    initPandaPace( pandaActor );
 
-   // Add our task.
-   // If we specify custom data instead of NULL, it will be passed as the second argument
-   // to the task function.
-   //taskMgr->add(new GenericAsyncTask("SpinCameraPos", &spinCameraTask, (void*) NULL));
-   //taskMgr->add( new GenericAsyncTask("UpdateCameraPos", &updateCameraTask, 
-   //   (void*) &pandaActor ) );
+   // Add a task to step the interval manager continuously 
    //taskMgr->add(new GenericAsyncTask("Step interval manager", &stepIntervalManTask, 
    //   (void*) NULL));
 
    PT(GenericAsyncTask) intervalStepTask = new GenericAsyncTask( "Step interval manager", 
       &stepIntervalManTask, (void*) NULL );
 
+   // make camera follow the actor
    LPoint3f pandaPos = pandaActor.get_pos();
    LPoint3f pandaHpr = pandaActor.get_hpr();
    camera.set_pos( pandaPos.get_x(), pandaPos.get_y() + 22.0, pandaPos.get_z() + 26.0 );
@@ -251,6 +144,7 @@ int main(int argc, char *argv[])
 
    // Run the engine.
    framework.main_loop();
+   
    // Shut down the engine when done.
    framework.close_framework();
 
